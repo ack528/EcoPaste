@@ -25,6 +25,10 @@ use tauri::{Manager, WindowEvent};
 pub fn run() {
     admin::handle_startup_auto_elevation();
 
+    // 必须早于任何 WebView 创建；日志插件此时尚未初始化，结果在 setup 里补记。
+    #[cfg(target_os = "windows")]
+    let pinned_webview2_folder = core::webview2::pin_runtime_version();
+
     // Webview target 把日志回灌到前端 devtools console，只在 dev 启用；
     // 生产环境只落 LogDir 文件；Stdout 仅在 debug 启用，避免 Windows Release stdout 缓冲区阻塞，也避免向用户的 webview console 喷日志。
     let mut log_targets = vec![tauri_plugin_log::Target::new(
@@ -187,6 +191,11 @@ pub fn run() {
         })
         .setup(move |app| {
             let handle = app.handle().clone();
+
+            #[cfg(target_os = "windows")]
+            if let Some(folder) = &pinned_webview2_folder {
+                log::info!("webview2 runtime pinned to {}", folder.display());
+            }
 
             // macOS：plugin 必须在 to_panel 前注册。
             #[cfg(target_os = "macos")]
