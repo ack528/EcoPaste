@@ -28,6 +28,8 @@ pub enum CommandKey {
     SyncNotRunning,
     SyncNoDevice,
     SyncCodeInvalid,
+    SyncAddressInvalid,
+    SyncUnreachable,
 }
 
 #[derive(Debug, Clone, Copy)]

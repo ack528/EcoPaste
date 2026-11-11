@@ -1494,6 +1494,8 @@ export interface SyncPairingCode {
 }
 
 export interface SyncStatus {
+  /** 本机可供手动连接的地址。 */
+  addresses: string[];
   deviceId: string;
   deviceName: string;
   enabled: boolean;
@@ -1541,11 +1543,11 @@ export const syncCancelPairing = () => {
 /**
  * 输入另一台设备展示的 6 位匹配码完成关联。
  */
-export const syncPairWithCode = (code: string) => {
+export const syncPairWithCode = (code: string, host?: string) => {
   return call<SyncPeer>(
     TAURI_COMMAND.SYNC_PAIR_WITH_CODE,
     "commands:labels.pairSyncDevice",
-    { code },
+    { code, host },
   );
 };
 

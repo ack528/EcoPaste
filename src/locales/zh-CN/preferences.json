@@ -731,9 +731,14 @@
     },
     "input": {
       "hint": "请输入另一台设备上「查看匹配码」中显示的 6 位匹配码。",
+      "hostHint": "填写 IP 后再输入匹配码，将直接连接该设备。",
+      "hostLabel": "对方 IP（在对方「查看匹配码」弹窗中显示）",
+      "hostPlaceholder": "例如 192.168.1.20",
+      "manual": "找不到设备？手动输入对方 IP",
       "title": "关联设备"
     },
     "pairing": {
+      "addresses": "本机 IP：{{addresses}}",
       "expired": "匹配码已过期",
       "hint": "请在另一台设备的 EcoPaste 中进入「跨设备 → 关联设备」，输入上方匹配码完成关联。",
       "regenerate": "重新生成",

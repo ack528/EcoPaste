@@ -13,7 +13,9 @@ use sha2::Sha256;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// 协议版本；不兼容变更时递增，握手阶段不匹配直接拒绝。
-pub const PROTOCOL_VERSION: u8 = 1;
+pub const PROTOCOL_VERSION: u8 = 2;
+/// 优先监听的固定端口，便于手动输入 IP 连接；被占用时回落到随机端口。
+pub const DEFAULT_PORT: u16 = 52526;
 /// 单帧（密文）上限。大负载由上层分块。
 pub const MAX_FRAME: usize = 16 * 1024 * 1024;
 /// 图片 / 文件分块大小。
@@ -25,7 +27,12 @@ pub enum Intro {
     /// 一次性配对（SPAKE2）。
     Pair { version: u8, device_id: String },
     /// 已配对设备的会话。
-    Session { version: u8, device_id: String },
+    /// `port` 为发起方自身的监听端口，供对端记录地址、后续回连。
+    Session {
+        version: u8,
+        device_id: String,
+        port: u16,
+    },
 }
 
 /// 握手阶段监听方对 [`Intro`] 的应答。
@@ -39,6 +46,8 @@ pub struct Hello {
 pub struct DeviceMeta {
     pub name: String,
     pub platform: String,
+    /// 本机监听端口。
+    pub port: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

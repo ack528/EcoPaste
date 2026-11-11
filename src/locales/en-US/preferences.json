@@ -731,9 +731,14 @@
     },
     "input": {
       "hint": "Enter the 6-digit code shown by \"Show pairing code\" on the other device.",
+      "hostHint": "Enter the IP first, then the code, to connect to that device directly.",
+      "hostLabel": "Other device's IP (shown in its pairing code dialog)",
+      "hostPlaceholder": "e.g. 192.168.1.20",
+      "manual": "Can't find the device? Enter its IP",
       "title": "Link device"
     },
     "pairing": {
+      "addresses": "This device's IP: {{addresses}}",
       "expired": "The code has expired",
       "hint": "On the other device, open EcoPaste, go to Sync → Link device and enter the code above.",
       "regenerate": "Generate again",

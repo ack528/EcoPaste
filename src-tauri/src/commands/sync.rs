@@ -15,6 +15,8 @@ fn pair_error(app: &AppHandle, err: PairError) -> AppError {
         PairError::NotRunning => Key::SyncNotRunning,
         PairError::NoDevice => Key::SyncNoDevice,
         PairError::CodeInvalid => Key::SyncCodeInvalid,
+        PairError::AddressInvalid => Key::SyncAddressInvalid,
+        PairError::Unreachable => Key::SyncUnreachable,
     };
     let message = i18n::commands::label(i18n::current_language(app), key);
     AppError::Other(anyhow::anyhow!(message))
@@ -39,15 +41,19 @@ pub async fn sync_cancel_pairing(app: AppHandle) -> Result<()> {
     Ok(())
 }
 
-/// 输入对端展示的 6 位配对码完成关联。
+/// 输入对端展示的 6 位配对码完成关联；`host` 可选，填写时直接连接该 IP（mDNS 不可用的兜底）。
 #[tauri::command]
-pub async fn sync_pair_with_code(app: AppHandle, code: String) -> Result<PeerStatus> {
+pub async fn sync_pair_with_code(
+    app: AppHandle,
+    code: String,
+    host: Option<String>,
+) -> Result<PeerStatus> {
     let code = code.trim();
     if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
         return Err(pair_error(&app, PairError::CodeInvalid));
     }
     state(&app)
-        .pair_with_code(code)
+        .pair_with_code(code, host.as_deref())
         .await
         .map_err(|err| pair_error(&app, err))
 }

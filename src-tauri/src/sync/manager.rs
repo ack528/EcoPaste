@@ -1,7 +1,7 @@
 //! 同步运行时：监听 / 发现 / 连接管理 / 广播 / 配对入口。
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -23,7 +23,7 @@ use super::identity::{current_platform, system_hostname, DeviceStore};
 use super::pairing::{PairOutcome, Pairing, PairingCode, CODE_TTL};
 use super::protocol::{
     read_plain, write_plain, DeviceMeta, Hello, Intro, Message, SecureReader, SecureWriter,
-    CHUNK_SIZE, PROTOCOL_VERSION,
+    CHUNK_SIZE, DEFAULT_PORT, PROTOCOL_VERSION,
 };
 use super::{pairing, remote_files, session, DEVICES_EVENT, PAIRING_EVENT};
 use crate::db::models::{ClipboardItem, ClipboardKind, ClipboardSubKind};
@@ -43,6 +43,7 @@ struct Running {
     discovery: Discovery,
     stop: watch::Sender<bool>,
     name: String,
+    port: u16,
 }
 
 struct PeerConn {
@@ -92,6 +93,8 @@ pub struct SyncStatus {
     pub platform: String,
     pub peers: Vec<PeerStatus>,
     pub pairing: Option<PairingCode>,
+    /// 本机可供手动连接的地址（`ip`，端口非默认时为 `ip:port`）。
+    pub addresses: Vec<String>,
 }
 
 /// 配对失败的原因，对应前端展示的文案。
@@ -103,6 +106,42 @@ pub enum PairError {
     NoDevice,
     #[error("pairing code is wrong or expired")]
     CodeInvalid,
+    #[error("address is invalid")]
+    AddressInvalid,
+    #[error("device is unreachable")]
+    Unreachable,
+}
+
+/// 解析手动输入的地址：`ip` 或 `ip:port`，省略端口时使用 [`DEFAULT_PORT`]。
+pub fn parse_manual_address(input: &str) -> Option<SocketAddr> {
+    let input = input.trim();
+    if let Ok(addr) = input.parse::<SocketAddr>() {
+        return Some(addr);
+    }
+    input
+        .parse::<IpAddr>()
+        .ok()
+        .map(|ip| SocketAddr::new(ip, DEFAULT_PORT))
+}
+
+/// 本机 IPv4 地址：排除回环、链路本地与代理 TUN 常用的 198.18.0.0/15，私网地址优先。
+fn local_ipv4_addresses() -> Vec<IpAddr> {
+    let mut addrs: Vec<IpAddr> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|iface| !iface.is_loopback() && !iface.is_link_local())
+        .map(|iface| iface.ip())
+        .filter(|ip| match ip {
+            IpAddr::V4(v4) => !(v4.octets()[0] == 198 && (v4.octets()[1] & 0xFE) == 18),
+            IpAddr::V6(_) => false,
+        })
+        .collect();
+    addrs.sort_by_key(|ip| match ip {
+        IpAddr::V4(v4) if v4.is_private() => 0,
+        _ => 1,
+    });
+    addrs.dedup();
+    addrs
 }
 
 impl SyncState {
@@ -145,13 +184,25 @@ impl SyncState {
         }
     }
 
+    /// 测试用：当前监听端口。
+    #[cfg(test)]
+    pub fn listen_port(&self) -> Option<u16> {
+        self.inner.listen_port()
+    }
+
     pub fn is_running(&self) -> bool {
         self.inner.running.lock().expect("sync poisoned").is_some()
     }
 
     async fn start(&self) -> Result<()> {
         let inner = self.inner.clone();
-        let listener = TcpListener::bind(("0.0.0.0", 0)).await?;
+        let listener = match TcpListener::bind(("0.0.0.0", DEFAULT_PORT)).await {
+            Ok(listener) => listener,
+            Err(err) => {
+                log::warn!("sync: port {DEFAULT_PORT} unavailable ({err}), using a random port");
+                TcpListener::bind(("0.0.0.0", 0)).await?
+            }
+        };
         let port = listener.local_addr()?.port();
         let name = inner.device_name();
 
@@ -162,6 +213,7 @@ impl SyncState {
             discovery,
             stop: stop_tx,
             name,
+            port,
         });
 
         tauri::async_runtime::spawn(accept_loop(inner.clone(), listener, stop_rx.clone()));
@@ -217,6 +269,19 @@ impl SyncState {
                 })
                 .collect(),
             pairing: inner.pairing.snapshot(),
+            addresses: match inner.listen_port() {
+                Some(port) => local_ipv4_addresses()
+                    .into_iter()
+                    .map(|ip| {
+                        if port == DEFAULT_PORT {
+                            ip.to_string()
+                        } else {
+                            SocketAddr::new(ip, port).to_string()
+                        }
+                    })
+                    .collect(),
+                None => Vec::new(),
+            },
         }
     }
 
@@ -244,11 +309,40 @@ impl SyncState {
         self.inner.refresh_pair_flag();
     }
 
-    /// 输入对端展示的 6 位码，尝试与所有正在展示配对码的设备配对。
-    pub async fn pair_with_code(&self, code: &str) -> Result<PeerStatus, PairError> {
+    /// 输入对端展示的 6 位码配对。
+    ///
+    /// `host` 非空时直接连接该地址（mDNS 被网络拦截时的兜底）；
+    /// 否则尝试所有经 mDNS 发现、正在展示配对码的设备。
+    pub async fn pair_with_code(
+        &self,
+        code: &str,
+        host: Option<&str>,
+    ) -> Result<PeerStatus, PairError> {
         let inner = self.inner.clone();
         if !self.is_running() {
             return Err(PairError::NotRunning);
+        }
+
+        if let Some(host) = host.map(str::trim).filter(|h| !h.is_empty()) {
+            let addr = parse_manual_address(host).ok_or(PairError::AddressInvalid)?;
+            let target = Discovered {
+                fullname: String::new(),
+                device_id: String::new(),
+                addrs: vec![addr.ip()],
+                port: addr.port(),
+                pairing: true,
+            };
+            return match connect_pair(&inner, &target, code).await {
+                Ok((outcome, dialed)) => {
+                    let device = inner.finish_pairing(outcome, Some(dialed.ip()))?;
+                    Ok(device_status(device))
+                }
+                Err(ConnectError::Unreachable) => Err(PairError::Unreachable),
+                Err(ConnectError::Other(err)) => {
+                    log::info!("sync: pairing with {addr} failed: {err:#}");
+                    Err(PairError::CodeInvalid)
+                }
+            };
         }
 
         let my_id = inner.store.device_id();
@@ -266,18 +360,12 @@ impl SyncState {
 
         for candidate in candidates {
             match connect_pair(&inner, &candidate, code).await {
-                Ok(outcome) => {
-                    let device = inner.finish_pairing(outcome)?;
-                    return Ok(PeerStatus {
-                        online: false,
-                        id: device.id,
-                        name: device.name,
-                        platform: device.platform,
-                        paired_at: device.paired_at,
-                    });
+                Ok((outcome, dialed)) => {
+                    let device = inner.finish_pairing(outcome, Some(dialed.ip()))?;
+                    return Ok(device_status(device));
                 }
                 Err(err) => {
-                    log::info!("sync: pairing with {} failed: {err:#}", candidate.device_id)
+                    log::info!("sync: pairing with {} failed: {err}", candidate.device_id)
                 }
             }
         }
@@ -359,17 +447,35 @@ impl Inner {
         }
     }
 
+    fn listen_port(&self) -> Option<u16> {
+        self.running
+            .lock()
+            .expect("sync poisoned")
+            .as_ref()
+            .map(|r| r.port)
+    }
+
     fn my_meta(&self) -> DeviceMeta {
         DeviceMeta {
             name: self.device_name(),
             platform: current_platform().to_owned(),
+            port: self.listen_port().unwrap_or(DEFAULT_PORT),
+        }
+    }
+
+    /// 记录对端地址；失败只记日志，不影响连接。
+    fn remember_addr(&self, peer_id: &str, addr: SocketAddr) {
+        if let Err(err) = self.store.set_addr(peer_id, &addr.to_string()) {
+            log::warn!("sync: persist address of {peer_id} failed: {err:#}");
         }
     }
 
     fn finish_pairing(
         &self,
         outcome: PairOutcome,
+        peer_ip: Option<IpAddr>,
     ) -> Result<super::identity::PairedDevice, PairError> {
+        let addr = peer_ip.map(|ip| SocketAddr::new(ip, outcome.peer_port).to_string());
         let device = self
             .store
             .upsert(
@@ -377,6 +483,7 @@ impl Inner {
                 &outcome.peer_name,
                 &outcome.peer_platform,
                 &outcome.long_key,
+                addr,
             )
             .map_err(|err| {
                 log::error!("sync: persist paired device failed: {err:#}");
@@ -495,7 +602,7 @@ async fn accept_loop(inner: Arc<Inner>, listener: TcpListener, mut stop: watch::
 async fn handle_incoming(
     inner: Arc<Inner>,
     stream: TcpStream,
-    _addr: SocketAddr,
+    addr: SocketAddr,
     stop: watch::Receiver<bool>,
 ) -> Result<()> {
     stream.set_nodelay(true).ok();
@@ -538,7 +645,7 @@ async fn handle_incoming(
                     inner.pairing.cancel();
                     inner.refresh_pair_flag();
                     let name = outcome.peer_name.clone();
-                    inner.finish_pairing(outcome)?;
+                    inner.finish_pairing(outcome, Some(addr.ip()))?;
                     inner.emit_pairing("success", Some(&name));
                     Ok(())
                 }
@@ -553,7 +660,11 @@ async fn handle_incoming(
                 }
             }
         }
-        Intro::Session { version, device_id } => {
+        Intro::Session {
+            version,
+            device_id,
+            port,
+        } => {
             if version != PROTOCOL_VERSION {
                 bail!("protocol version mismatch");
             }
@@ -575,25 +686,54 @@ async fn handle_incoming(
                 session::server_handshake(reader, writer, &key, &my_id, &device_id),
             )
             .await??;
+            inner.remember_addr(&device_id, SocketAddr::new(addr.ip(), port));
             run_connection(inner, device_id, secure_r, secure_w, stop).await;
             Ok(())
         }
     }
 }
 
-async fn dial(discovered: &Discovered) -> Result<TcpStream> {
+/// 依次尝试对端的各个地址，返回连上的流与实际地址。
+async fn dial(discovered: &Discovered) -> Option<(TcpStream, SocketAddr)> {
     for ip in &discovered.addrs {
         let addr = SocketAddr::new(*ip, discovered.port);
         if let Ok(Ok(stream)) = timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await {
             stream.set_nodelay(true).ok();
-            return Ok(stream);
+            return Some((stream, addr));
         }
     }
-    bail!("device is unreachable")
+    None
 }
 
-async fn connect_pair(inner: &Arc<Inner>, peer: &Discovered, code: &str) -> Result<PairOutcome> {
-    let stream = dial(peer).await?;
+/// 配对连接失败的分类：连不上（网络问题）与其它（码错误、协议不符等）。
+#[derive(Debug)]
+enum ConnectError {
+    Unreachable,
+    Other(anyhow::Error),
+}
+
+impl std::fmt::Display for ConnectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unreachable => write!(f, "device is unreachable"),
+            Self::Other(err) => write!(f, "{err:#}"),
+        }
+    }
+}
+
+impl From<anyhow::Error> for ConnectError {
+    fn from(err: anyhow::Error) -> Self {
+        Self::Other(err)
+    }
+}
+
+/// 发起配对。`peer.device_id` 为空表示手动地址，接受对端自报的身份。
+async fn connect_pair(
+    inner: &Arc<Inner>,
+    peer: &Discovered,
+    code: &str,
+) -> std::result::Result<(PairOutcome, SocketAddr), ConnectError> {
+    let (stream, dialed) = dial(peer).await.ok_or(ConnectError::Unreachable)?;
     let (mut reader, mut writer) = tokio::io::split(stream);
     let my_id = inner.store.device_id();
 
@@ -605,24 +745,41 @@ async fn connect_pair(inner: &Arc<Inner>, peer: &Discovered, code: &str) -> Resu
         },
     )
     .await?;
-    let hello: Hello = timeout(HANDSHAKE_TIMEOUT, read_plain(&mut reader)).await??;
-    if hello.device_id != peer.device_id {
-        bail!("device identity mismatch");
+    let hello: Hello = timeout(HANDSHAKE_TIMEOUT, read_plain(&mut reader))
+        .await
+        .map_err(|_| anyhow!("handshake timed out"))??;
+    if !peer.device_id.is_empty() && hello.device_id != peer.device_id {
+        return Err(anyhow!("device identity mismatch").into());
+    }
+    if hello.device_id == my_id {
+        return Err(anyhow!("cannot pair with this device itself").into());
     }
 
-    timeout(
+    let outcome = timeout(
         HANDSHAKE_TIMEOUT,
         pairing::run_handshake(
             reader,
             writer,
             code,
             &my_id,
-            &peer.device_id,
+            &hello.device_id,
             inner.my_meta(),
             true,
         ),
     )
-    .await?
+    .await
+    .map_err(|_| anyhow!("handshake timed out"))??;
+    Ok((outcome, dialed))
+}
+
+fn device_status(device: super::identity::PairedDevice) -> PeerStatus {
+    PeerStatus {
+        online: false,
+        id: device.id,
+        name: device.name,
+        platform: device.platform,
+        paired_at: device.paired_at,
+    }
 }
 
 async fn connect_session(
@@ -635,7 +792,9 @@ async fn connect_session(
         .get(&peer.device_id)
         .and_then(|d| d.key_bytes())
         .ok_or_else(|| anyhow!("device is not paired"))?;
-    let stream = dial(&peer).await?;
+    let (stream, dialed) = dial(&peer)
+        .await
+        .ok_or_else(|| anyhow!("device is unreachable"))?;
     let (mut reader, mut writer) = tokio::io::split(stream);
     let my_id = inner.store.device_id();
 
@@ -644,6 +803,7 @@ async fn connect_session(
         &Intro::Session {
             version: PROTOCOL_VERSION,
             device_id: my_id.clone(),
+            port: inner.listen_port().unwrap_or(DEFAULT_PORT),
         },
     )
     .await?;
@@ -657,6 +817,7 @@ async fn connect_session(
         session::client_handshake(reader, writer, &key, &my_id, &peer.device_id),
     )
     .await??;
+    inner.remember_addr(&peer.device_id, dialed);
     run_connection(inner, peer.device_id, secure_r, secure_w, stop).await;
     Ok(())
 }
@@ -698,7 +859,8 @@ async fn browse_loop(
     }
 }
 
-/// 周期检查：对已发现、已配对、尚未连接的设备发起会话。
+/// 周期检查：对已配对、尚未连接的设备发起会话。
+/// 地址优先用 mDNS 发现结果，发现不到时用上次记录的地址（mDNS 被网络拦截的兜底）。
 /// 只由 `device_id` 字典序较小的一方拨号，避免双向同时连接。
 async fn supervise_loop(inner: Arc<Inner>, mut stop: watch::Receiver<bool>) {
     let my_id = inner.store.device_id();
@@ -712,14 +874,24 @@ async fn supervise_loop(inner: Arc<Inner>, mut stop: watch::Receiver<bool>) {
         let targets: Vec<Discovered> = {
             let discovered = inner.discovered.lock().expect("sync poisoned");
             let peers = inner.peers.lock().expect("sync poisoned");
-            discovered
-                .values()
-                .filter(|d| {
-                    my_id < d.device_id
-                        && inner.store.is_paired(&d.device_id)
-                        && !peers.contains_key(&d.device_id)
+            inner
+                .store
+                .list()
+                .into_iter()
+                .filter(|device| my_id < device.id && !peers.contains_key(&device.id))
+                .filter_map(|device| {
+                    if let Some(found) = discovered.get(&device.id) {
+                        return Some(found.clone());
+                    }
+                    let addr: SocketAddr = device.addr.as_deref()?.parse().ok()?;
+                    Some(Discovered {
+                        fullname: String::new(),
+                        device_id: device.id,
+                        addrs: vec![addr.ip()],
+                        port: addr.port(),
+                        pairing: false,
+                    })
                 })
-                .cloned()
                 .collect()
         };
 
@@ -1048,5 +1220,36 @@ fn text_message(item: &ClipboardItem) -> Message {
             html: None,
             rtf: None,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manual_address_accepts_ip_with_or_without_port() {
+        assert_eq!(
+            parse_manual_address(" 192.168.1.20 "),
+            Some("192.168.1.20:52526".parse().unwrap())
+        );
+        assert_eq!(
+            parse_manual_address("10.0.0.5:6000"),
+            Some("10.0.0.5:6000".parse().unwrap())
+        );
+        assert_eq!(parse_manual_address("not-an-ip"), None);
+        assert_eq!(parse_manual_address("300.1.1.1"), None);
+    }
+
+    #[test]
+    fn local_addresses_skip_loopback_and_tun_ranges() {
+        for ip in local_ipv4_addresses() {
+            let IpAddr::V4(v4) = ip else {
+                panic!("only ipv4 expected");
+            };
+            assert!(!v4.is_loopback());
+            assert!(!v4.is_link_local());
+            assert!(!(v4.octets()[0] == 198 && (v4.octets()[1] & 0xFE) == 18));
+        }
     }
 }

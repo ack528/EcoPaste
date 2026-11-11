@@ -38,6 +38,18 @@ the wire protocol, or what gets sent to peers.
   (max 3, 30 min TTL); the receiver places a virtual-file `IDataObject` and pulls ranges
   with `FetchFile` only when an app reads the stream.
 
+## Discovery fallback (manual IP)
+
+- Many campus / office Wi-Fi networks drop multicast between clients, so mDNS never sees
+  the peer. The listener prefers fixed port `DEFAULT_PORT` (52526; random if taken), the
+  pairing-code dialog shows local IPv4s (`SyncStatus.addresses`, excluding loopback,
+  link-local and the 198.18.0.0/15 proxy-TUN range), and `sync_pair_with_code` accepts an
+  optional `host` (`ip` or `ip:port`) to dial directly.
+- Every successful pairing/session records the peer's `ip:port` in `PairedDevice.addr`
+  (`DeviceMeta.port` / `Intro::Session.port` carry the listening port). `supervise_loop`
+  falls back to that address when mDNS has not discovered the peer.
+- Protocol version is 2 since these fields were added; v1 peers are ignored/rejected.
+
 ## Gotchas
 
 - Windows clipboard open can be refused while another app holds it: receive-side writes

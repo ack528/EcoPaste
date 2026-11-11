@@ -122,7 +122,7 @@ async fn pair_and_connect(fx: &Fixture) {
 
     let mut paired = false;
     for _ in 0..40 {
-        match fx.b.pair_with_code(&code).await {
+        match fx.b.pair_with_code(&code, None).await {
             Ok(_) => {
                 paired = true;
                 break;
@@ -151,7 +151,7 @@ async fn wrong_code_is_rejected_and_code_burns_out() {
 
     let mut rejected = 0;
     for _ in 0..40 {
-        match fx.b.pair_with_code(wrong).await {
+        match fx.b.pair_with_code(wrong, None).await {
             Err(super::PairError::CodeInvalid) => {
                 rejected += 1;
                 if rejected == 3 {
@@ -164,10 +164,46 @@ async fn wrong_code_is_rejected_and_code_burns_out() {
     assert_eq!(rejected, 3, "expected three wrong-code rejections");
 
     // 三次失败后真码也不再可用。
-    assert!(fx.b.pair_with_code(&code).await.is_err());
+    assert!(fx.b.pair_with_code(&code, None).await.is_err());
     assert!(fx.a.status().pairing.is_none());
     assert!(fx.a.status().peers.is_empty());
     assert!(fx.b.status().peers.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "uses mDNS and the local network"]
+async fn manual_address_pairs_and_remembers_peer() {
+    let fx = fixture().await;
+    let port = fx.a.listen_port().expect("a is listening");
+    let code = fx.a.start_pairing().expect("start pairing").code;
+
+    assert!(matches!(
+        fx.b.pair_with_code(&code, Some("not-an-ip")).await,
+        Err(super::PairError::AddressInvalid)
+    ));
+    assert!(matches!(
+        fx.b.pair_with_code(&code, Some("127.0.0.1:1")).await,
+        Err(super::PairError::Unreachable)
+    ));
+
+    let host = format!("127.0.0.1:{port}");
+    fx.b.pair_with_code(&code, Some(&host))
+        .await
+        .expect("manual pairing");
+
+    let a_id = fx.a.status().device_id;
+    let stored = super::identity::DeviceStore::load_from(fx.dir.join("b.json"))
+        .unwrap()
+        .get(&a_id)
+        .and_then(|d| d.addr);
+    assert_eq!(stored.as_deref(), Some(host.as_str()));
+
+    wait_until("session established", Duration::from_secs(40), || {
+        fx.a.status().peers.iter().all(|p| p.online)
+            && fx.b.status().peers.iter().all(|p| p.online)
+            && fx.a.status().peers.len() == 1
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

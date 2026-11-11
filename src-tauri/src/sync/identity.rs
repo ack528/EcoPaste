@@ -42,6 +42,9 @@ pub struct PairedDevice {
     /// 配对时协商出的 32 字节长期密钥（hex）。不得序列化给前端，见 [`PairedDevice::public`]。
     pub key: String,
     pub paired_at: String,
+    /// 最近一次成功连接的对端地址（`ip:port`）；mDNS 不可用时据此回连。
+    #[serde(default)]
+    pub addr: Option<String>,
 }
 
 impl PairedDevice {
@@ -110,10 +113,6 @@ impl DeviceStore {
         self.list().into_iter().find(|d| d.id == id)
     }
 
-    pub fn is_paired(&self, id: &str) -> bool {
-        self.get(id).is_some()
-    }
-
     /// 新增或覆盖（重新配对）一台设备。
     pub fn upsert(
         &self,
@@ -121,6 +120,7 @@ impl DeviceStore {
         name: &str,
         platform: &str,
         key: &[u8; 32],
+        addr: Option<String>,
     ) -> Result<PairedDevice> {
         let device = PairedDevice {
             id: id.to_owned(),
@@ -128,6 +128,7 @@ impl DeviceStore {
             platform: platform.to_owned(),
             key: hex_encode(key),
             paired_at: Utc::now().to_rfc3339(),
+            addr,
         };
         {
             let mut data = self.data.lock().expect("device store poisoned");
@@ -136,6 +137,24 @@ impl DeviceStore {
         }
         self.persist()?;
         Ok(device)
+    }
+
+    /// 记录对端最新地址；未变化时不落盘。
+    pub fn set_addr(&self, id: &str, addr: &str) -> Result<()> {
+        let changed = {
+            let mut data = self.data.lock().expect("device store poisoned");
+            match data.devices.iter_mut().find(|d| d.id == id) {
+                Some(device) if device.addr.as_deref() != Some(addr) => {
+                    device.addr = Some(addr.to_owned());
+                    true
+                }
+                _ => false,
+            }
+        };
+        if changed {
+            self.persist()?;
+        }
+        Ok(())
     }
 
     pub fn rename(&self, id: &str, name: &str) -> Result<bool> {
@@ -225,17 +244,19 @@ mod tests {
         let path = temp_path();
         let store = DeviceStore::load_from(path.clone()).unwrap();
         store
-            .upsert("peer", "Laptop", "windows", &[9u8; 32])
+            .upsert("peer", "Laptop", "windows", &[9u8; 32], None)
             .unwrap();
+        store.set_addr("peer", "10.0.0.2:52526").unwrap();
 
         let reloaded = DeviceStore::load_from(path.clone()).unwrap();
         let device = reloaded.get("peer").unwrap();
         assert_eq!(device.key_bytes(), Some([9u8; 32]));
+        assert_eq!(device.addr.as_deref(), Some("10.0.0.2:52526"));
 
         assert!(reloaded.rename("peer", "Desk").unwrap());
         assert_eq!(reloaded.get("peer").unwrap().name, "Desk");
         assert!(reloaded.remove("peer").unwrap());
-        assert!(!reloaded.is_paired("peer"));
+        assert!(reloaded.get("peer").is_none());
         fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 

@@ -118,6 +118,7 @@ pub struct PairOutcome {
     pub peer_id: String,
     pub peer_name: String,
     pub peer_platform: String,
+    pub peer_port: u16,
     pub long_key: [u8; 32],
 }
 
@@ -189,6 +190,7 @@ where
         peer_id: peer_id.to_owned(),
         peer_name: meta.name,
         peer_platform: meta.platform,
+        peer_port: meta.port,
         long_key: derive_key(&shared, salt.as_bytes(), b"ecopaste-sync/long-term"),
     })
 }
@@ -201,6 +203,7 @@ mod tests {
         DeviceMeta {
             name: name.into(),
             platform: "windows".into(),
+            port: 1,
         }
     }
 

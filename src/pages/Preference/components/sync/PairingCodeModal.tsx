@@ -6,6 +6,7 @@ import {
   type SyncPairingCode,
   type SyncPairingEvent,
   syncCancelPairing,
+  syncGetStatus,
   syncStartPairing,
 } from "@/commands";
 import { TAURI_EVENT } from "@/constants/events";
@@ -26,6 +27,7 @@ const PairingCodeModal: FC<PairingCodeModalProps> = (props) => {
   const { open, onClose } = props;
   const [pairing, setPairing] = useState<SyncPairingCode | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [addresses, setAddresses] = useState<string[]>([]);
   const openRef = useRef(open);
   openRef.current = open;
 
@@ -38,6 +40,15 @@ const PairingCodeModal: FC<PairingCodeModalProps> = (props) => {
     } catch (error) {
       log.warn("start sync pairing failed", error);
       onClose();
+      return;
+    }
+
+    try {
+      const status = await syncGetStatus();
+
+      setAddresses(status.addresses);
+    } catch (error) {
+      log.warn("load local sync addresses failed", error);
     }
   };
 
@@ -128,6 +139,12 @@ const PairingCodeModal: FC<PairingCodeModalProps> = (props) => {
         <div className="text-center text-ant-secondary text-xs leading-relaxed">
           {t("sync.pairing.hint")}
         </div>
+
+        {addresses.length > 0 && (
+          <div className="text-center text-ant-secondary text-xs">
+            {t("sync.pairing.addresses", { addresses: addresses.join(" / ") })}
+          </div>
+        )}
 
         {expired && (
           <Button onClick={handleRegenerate} type="primary">
