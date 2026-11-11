@@ -338,8 +338,9 @@ impl ClipboardHandler for ClipboardChangeHandler {
         let app = self.app.clone();
         tauri::async_runtime::spawn(async move {
             let pool = app.state::<crate::db::DatabaseState>().pool().await;
-            if let Err(err) = persist_and_notify(&app, &pool, &item, source_app.as_ref()).await {
-                log::error!("clipboard watcher: persist failed: {err}");
+            match persist_and_notify(&app, &pool, &item, source_app.as_ref()).await {
+                Ok(_) => crate::sync::broadcast_item(&app, &item),
+                Err(err) => log::error!("clipboard watcher: persist failed: {err}"),
             }
         });
     }

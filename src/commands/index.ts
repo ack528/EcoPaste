@@ -1478,3 +1478,95 @@ export const hideContextMenus = async () => {
     log.error("hide context menus failed", toAppError(error));
   }
 };
+
+export interface SyncPeer {
+  id: string;
+  name: string;
+  online: boolean;
+  pairedAt: string;
+  platform: "macos" | "windows";
+}
+
+export interface SyncPairingCode {
+  code: string;
+  /** Unix 毫秒。 */
+  expiresAt: number;
+}
+
+export interface SyncStatus {
+  deviceId: string;
+  deviceName: string;
+  enabled: boolean;
+  pairing: SyncPairingCode | null;
+  peers: SyncPeer[];
+  platform: "macos" | "windows";
+  running: boolean;
+}
+
+export interface SyncPairingEvent {
+  peer: string | null;
+  state: "expired" | "failed" | "success";
+}
+
+/**
+ * 读取跨设备同步状态：本机信息、已配对设备与当前配对码。
+ */
+export const syncGetStatus = () => {
+  return call<SyncStatus>(
+    TAURI_COMMAND.SYNC_GET_STATUS,
+    "commands:labels.loadSyncStatus",
+  );
+};
+
+/**
+ * 生成 6 位匹配码，等待另一台设备输入。
+ */
+export const syncStartPairing = () => {
+  return call<SyncPairingCode>(
+    TAURI_COMMAND.SYNC_START_PAIRING,
+    "commands:labels.startSyncPairing",
+  );
+};
+
+/**
+ * 取消当前展示的匹配码。
+ */
+export const syncCancelPairing = () => {
+  return call<void>(
+    TAURI_COMMAND.SYNC_CANCEL_PAIRING,
+    "commands:labels.cancelSyncPairing",
+  );
+};
+
+/**
+ * 输入另一台设备展示的 6 位匹配码完成关联。
+ */
+export const syncPairWithCode = (code: string) => {
+  return call<SyncPeer>(
+    TAURI_COMMAND.SYNC_PAIR_WITH_CODE,
+    "commands:labels.pairSyncDevice",
+    { code },
+  );
+};
+
+/**
+ * 重命名已关联设备。
+ */
+export const syncRenamePeer = (id: string, name: string) => {
+  return call<void>(
+    TAURI_COMMAND.SYNC_RENAME_PEER,
+    "commands:labels.renameSyncDevice",
+    { id, name },
+  );
+};
+
+/**
+ * 解除与某台设备的关联。
+ */
+export const syncRemovePeer = (id: string) => {
+  return call<void>(
+    TAURI_COMMAND.SYNC_REMOVE_PEER,
+    "commands:labels.removeSyncDevice",
+    { id },
+  );
+};

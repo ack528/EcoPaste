@@ -132,6 +132,12 @@
       "source": {
         "title": "App Filters"
       },
+      "syncDevices": {
+        "title": "My devices"
+      },
+      "syncGeneral": {
+        "title": "LAN sync"
+      },
       "updates": {
         "title": "Updates"
       },
@@ -558,6 +564,29 @@
           "title": "Ignored Apps"
         }
       },
+      "syncGeneral": {
+        "deviceName": {
+          "description": "Name shown on other devices. Leave empty to use the computer name.",
+          "placeholder": "Use computer name",
+          "title": "This device name"
+        },
+        "enabled": {
+          "description": "Automatically sync the clipboard between linked devices on the same local network, encrypted in transit.",
+          "title": "Cross-device clipboard sync"
+        },
+        "files": {
+          "description": "Files are not sent in advance; they are fetched on demand when pasted on another device.",
+          "title": "Sync files"
+        },
+        "image": {
+          "description": "Images are synced to other devices as soon as they are copied.",
+          "title": "Sync images"
+        },
+        "text": {
+          "description": "Sync plain text, HTML and RTF.",
+          "title": "Sync text"
+        }
+      },
       "updates": {
         "autoCheck": {
           "description": "Periodically check whether a new EcoPaste version is available.",
@@ -653,6 +682,9 @@
       "shortcuts": {
         "title": "Shortcuts"
       },
+      "sync": {
+        "title": "Sync"
+      },
       "workflow": {
         "title": "Interface"
       }
@@ -681,5 +713,33 @@
     "reset": "Reset to default directory",
     "resetConfirmContent": "EcoPaste will move the current history database, settings, and resource cache back to the default data directory, then delete the current custom data directory after migration succeeds.",
     "resetConfirmTitle": "Reset Data Directory"
+  },
+  "sync": {
+    "devices": {
+      "cancel": "Cancel",
+      "disabled": "Turn on \"Cross-device clipboard sync\" above to link devices.",
+      "hint": "On two devices in the same local network, click \"Show pairing code\" on one and \"Link device\" on the other, then enter the code.",
+      "link": "Link device",
+      "macos": "macOS",
+      "offline": "Offline",
+      "online": "Online",
+      "self": "This device",
+      "showCode": "Show pairing code",
+      "unlink": "Unlink",
+      "unlinkConfirm": "Unlink \"{{name}}\"?",
+      "windows": "Windows"
+    },
+    "input": {
+      "hint": "Enter the 6-digit code shown by \"Show pairing code\" on the other device.",
+      "title": "Link device"
+    },
+    "pairing": {
+      "expired": "The code has expired",
+      "hint": "On the other device, open EcoPaste, go to Sync → Link device and enter the code above.",
+      "regenerate": "Generate again",
+      "success": "Linked with \"{{name}}\"",
+      "title": "This device's pairing code",
+      "validFor": "Code is valid for {{time}}"
+    }
   }
 }

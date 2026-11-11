@@ -7,5 +7,8 @@ pub fn label(key: Key) -> &'static str {
         Key::DragImageMissing => "The image file no longer exists",
         Key::DragTextEmpty => "Text content is empty",
         Key::ExternalUrlUnsupported => "Only links starting with http or https can be opened",
+        Key::SyncNotRunning => "Turn on cross-device sync first",
+        Key::SyncNoDevice => "No device is showing a pairing code",
+        Key::SyncCodeInvalid => "The pairing code is wrong or has expired",
     }
 }

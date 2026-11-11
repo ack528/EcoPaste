@@ -25,6 +25,9 @@ pub enum CommandKey {
     DragImageMissing,
     DragTextEmpty,
     ExternalUrlUnsupported,
+    SyncNotRunning,
+    SyncNoDevice,
+    SyncCodeInvalid,
 }
 
 #[derive(Debug, Clone, Copy)]

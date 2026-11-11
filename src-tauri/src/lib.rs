@@ -15,6 +15,7 @@ mod menu;
 mod mouse;
 mod settings;
 mod shortcut;
+mod sync;
 mod tray;
 mod update;
 mod window;
@@ -179,6 +180,12 @@ pub fn run() {
             commands::open_preference_directory,
             commands::get_autostart,
             commands::set_autostart,
+            commands::sync_get_status,
+            commands::sync_start_pairing,
+            commands::sync_cancel_pairing,
+            commands::sync_pair_with_code,
+            commands::sync_rename_peer,
+            commands::sync_remove_peer,
             commands::get_update_status,
             commands::check_for_updates,
             commands::download_update,
@@ -224,6 +231,11 @@ pub fn run() {
                 handle_db.manage(db::DatabaseState::new(pool));
                 clipboard::init(&handle_db)?;
                 Ok::<_, anyhow::Error>(())
+            })?;
+
+            sync::init(&handle).map_err(|err| {
+                log::error!("sync initialization failed: {err:?}");
+                err
             })?;
 
             shortcut::init(&handle, &settings.shortcuts).map_err(|err| {
