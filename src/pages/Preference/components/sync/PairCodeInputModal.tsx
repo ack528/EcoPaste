@@ -1,8 +1,9 @@
 import { Button, Input, Modal } from "antd";
 import type { ChangeEvent, FC } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { syncPairWithCode } from "@/commands";
+import { cn } from "@/utils/cn";
 import { getMessageApi } from "@/utils/feedback";
 import { log } from "@/utils/log";
 
@@ -24,6 +25,20 @@ const PairCodeInputModal: FC<PairCodeInputModalProps> = (props) => {
   const [host, setHost] = useState("");
   const [manual, setManual] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const codeInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!open || manual) return;
+
+    const timer = window.setTimeout(() => {
+      codeInputRef.current?.focus();
+    }, 120);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [open, manual]);
 
   useEffect(() => {
     if (!open) {
@@ -53,7 +68,9 @@ const PairCodeInputModal: FC<PairCodeInputModalProps> = (props) => {
     }
   };
 
-  const handleCodeChange = (value: string) => {
+  const handleCodeChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value.replace(/\D/g, "").slice(0, CODE_LENGTH);
+
     setCode(value);
 
     if (value.length === CODE_LENGTH) {
@@ -81,9 +98,17 @@ const PairCodeInputModal: FC<PairCodeInputModalProps> = (props) => {
     onClose();
   };
 
-  const formatDigits = (value: string) => {
-    return value.replace(/\D/g, "");
+  const handleCodeFocus = () => {
+    setFocused(true);
   };
+
+  const handleCodeBlur = () => {
+    setFocused(false);
+  };
+
+  const cells = Array.from({ length: CODE_LENGTH }, (_, index) => {
+    return code[index] ?? "";
+  });
 
   return (
     <Modal
@@ -116,15 +141,38 @@ const PairCodeInputModal: FC<PairCodeInputModalProps> = (props) => {
           </div>
         )}
 
-        <Input.OTP
-          autoFocus={!manual}
-          disabled={loading}
-          formatter={formatDigits}
-          length={CODE_LENGTH}
-          onChange={handleCodeChange}
-          size="large"
-          value={code}
-        />
+        <div className="relative flex gap-2">
+          {cells.map((digit, index) => {
+            const active = focused && index === Math.min(code.length, 5);
+
+            return (
+              <div
+                className={cn(
+                  "flex h-12 w-10 items-center justify-center rounded-2 border bg-ant-layout font-semibold text-ant-text text-xl tabular-nums",
+                  active ? "border-ant-primary" : "border-ant-border",
+                )}
+                // biome-ignore lint/suspicious/noArrayIndexKey: 固定 6 位槽位，顺序即身份
+                key={index}
+              >
+                {digit}
+              </div>
+            );
+          })}
+
+          <input
+            aria-label={t("sync.input.title")}
+            autoComplete="off"
+            className="absolute inset-0 size-full cursor-text opacity-0"
+            disabled={loading}
+            inputMode="numeric"
+            maxLength={CODE_LENGTH}
+            onBlur={handleCodeBlur}
+            onChange={handleCodeChange}
+            onFocus={handleCodeFocus}
+            ref={codeInputRef}
+            value={code}
+          />
+        </div>
 
         {manual ? (
           <span className="text-center text-ant-secondary text-xs leading-relaxed">
