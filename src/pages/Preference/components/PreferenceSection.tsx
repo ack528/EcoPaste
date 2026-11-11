@@ -17,6 +17,7 @@ import { translatePreferenceSection } from "../utils/preferenceI18n";
 import PreferenceCountTag from "./PreferenceCountTag";
 import PreferenceSettingRow from "./PreferenceSettingRow";
 import SourceAppsTransfer from "./SourceAppsTransfer";
+import CloudSyncPanel from "./sync/CloudSyncPanel";
 import SyncDevicesPanel from "./sync/SyncDevicesPanel";
 
 interface PreferenceSectionProps {
@@ -112,6 +113,7 @@ const PreferenceSection: FC<PreferenceSectionProps> = (props) => {
 
       <div>
         {section.id === "syncDevices" && <SyncDevicesPanel />}
+        {section.id === "cloudSync" && <CloudSyncPanel />}
         {section.settings.map((setting) => {
           return (
             <PreferenceSettingRow

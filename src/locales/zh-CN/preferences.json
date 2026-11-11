@@ -90,6 +90,9 @@
       "capture": {
         "title": "内容类型"
       },
+      "cloudSync": {
+        "title": "云同步"
+      },
       "control": {
         "title": "系统入口"
       },
@@ -715,6 +718,35 @@
     "resetConfirmTitle": "还原默认数据目录"
   },
   "sync": {
+    "cloud": {
+      "connect": "连接",
+      "description": "连接你自己搭建的 EcoPasteServer，在不同网络的设备之间同步，并保留云端近期历史。",
+      "enable": "启用云同步",
+      "fingerprint": "证书指纹",
+      "loggedInAs": "已登录：{{username}}",
+      "login": "登录",
+      "loginTitle": "登录云同步",
+      "logout": "退出登录",
+      "notLoggedIn": "未登录",
+      "password": "密码",
+      "pull": "拉取最近记录",
+      "pulled": "已拉取 {{count}} 条",
+      "server": "服务器：{{server}}",
+      "serverLabel": "服务器地址",
+      "serverPlaceholder": "例如 203.0.113.5:52530 或 sync.example.com",
+      "state": {
+        "connected": "已连接",
+        "connecting": "连接中",
+        "disconnected": "未连接",
+        "error": "连接失败"
+      },
+      "title": "云同步",
+      "trustAction": "信任并继续",
+      "trustHint": "请与服务器管理程序「概览」页显示的证书指纹逐段核对。一致才点「信任并继续」，之后只接受这张证书。",
+      "trustTitle": "确认服务器证书",
+      "username": "用户名",
+      "warning": "云同步使用 HTTPS 加密传输，但服务器管理员可以看到同步的内容（没有端到端加密）。敏感内容和被排除应用的内容不会上传。"
+    },
     "devices": {
       "cancel": "取消",
       "disabled": "开启上方「跨设备剪贴板同步」后即可关联设备。",

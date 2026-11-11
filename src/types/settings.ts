@@ -221,6 +221,11 @@ export interface Sync {
   syncText: boolean;
 }
 
+export interface Cloud {
+  enabled: boolean;
+  pullRecent: number;
+}
+
 export interface Settings {
   general: General;
   appearance: Appearance;
@@ -229,6 +234,7 @@ export interface Settings {
   onboarding: Onboarding;
   update: Update;
   sync: Sync;
+  cloud: Cloud;
 }
 
 /**

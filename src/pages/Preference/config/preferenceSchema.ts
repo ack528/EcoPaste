@@ -834,6 +834,10 @@ export const preferenceTabs: PreferenceTab[] = [
         id: "syncDevices",
         settings: [],
       },
+      {
+        id: "cloudSync",
+        settings: [],
+      },
     ],
   },
   {

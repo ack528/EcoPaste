@@ -2,6 +2,7 @@ mod admin;
 mod autostart;
 mod backup;
 mod clipboard;
+mod cloud;
 mod commands;
 mod core;
 mod db;
@@ -180,6 +181,11 @@ pub fn run() {
             commands::open_preference_directory,
             commands::get_autostart,
             commands::set_autostart,
+            commands::cloud_get_status,
+            commands::cloud_probe,
+            commands::cloud_login,
+            commands::cloud_logout,
+            commands::cloud_pull_recent,
             commands::sync_get_status,
             commands::sync_start_pairing,
             commands::sync_cancel_pairing,
@@ -231,6 +237,11 @@ pub fn run() {
                 handle_db.manage(db::DatabaseState::new(pool));
                 clipboard::init(&handle_db)?;
                 Ok::<_, anyhow::Error>(())
+            })?;
+
+            cloud::init(&handle).map_err(|err| {
+                log::error!("cloud initialization failed: {err:?}");
+                err
             })?;
 
             sync::init(&handle).map_err(|err| {

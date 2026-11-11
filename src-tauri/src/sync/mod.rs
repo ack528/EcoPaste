@@ -22,8 +22,10 @@ mod protocol;
 mod remote_files;
 mod session;
 
-pub use manager::{PairError, PeerStatus, SyncState, SyncStatus};
+pub(crate) use apply::{apply_image_with, apply_text_with, image_limit};
+pub use manager::{text_parts, PairError, PeerStatus, SyncState, SyncStatus};
 pub use pairing::PairingCode;
+pub(crate) use protocol::FileEntry;
 
 use tauri::{AppHandle, Manager};
 
@@ -34,6 +36,33 @@ use crate::db::models::ClipboardItem;
 pub const DEVICES_EVENT: &str = "sync://devices";
 /// 配对进度：`{ state: "success" | "failed" | "expired", peer?: string }`。
 pub const PAIRING_EVENT: &str = "sync://pairing";
+
+/// 测试用：把「写系统剪贴板」改为内存记录。
+#[cfg(test)]
+pub(crate) fn apply_sink_enable() {
+    *apply::TEST_SINK.lock().expect("sink poisoned") = Some(Vec::new());
+}
+
+/// 测试用：取出到目前为止被记录的写剪贴板条目。
+#[cfg(test)]
+pub(crate) fn apply_sink_items() -> Vec<crate::db::models::ClipboardItem> {
+    apply::TEST_SINK
+        .lock()
+        .expect("sink poisoned")
+        .clone()
+        .unwrap_or_default()
+}
+
+/// 把对端（局域网设备或云端设备）的文件清单呈现为本机剪贴板上的虚拟文件。
+pub(crate) fn present_remote_files(
+    app: &AppHandle,
+    state: SyncState,
+    peer_id: &str,
+    offer: &str,
+    entries: Vec<FileEntry>,
+) {
+    remote_files::present(app, state, peer_id, offer, entries);
+}
 
 /// 在 setup 中调用：注册 [`SyncState`]，设置已开启时立即启动。
 pub fn init(app: &AppHandle) -> Result<()> {

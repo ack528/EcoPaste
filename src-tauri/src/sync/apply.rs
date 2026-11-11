@@ -37,11 +37,38 @@ pub fn image_limit(app: &AppHandle) -> u64 {
         .map_or(HARD_IMAGE_LIMIT, |limit| limit.min(HARD_IMAGE_LIMIT))
 }
 
+/// 近期已应用的远端内容哈希：局域网与云端同时到达同一条内容时只处理一次。
+static RECENT: std::sync::Mutex<Vec<(String, std::time::Instant)>> =
+    std::sync::Mutex::new(Vec::new());
+const RECENT_TTL: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// 记录哈希并返回是否在 TTL 内已见过。
+fn seen_recently(hash: &str) -> bool {
+    let mut recent = RECENT.lock().expect("recent poisoned");
+    recent.retain(|(_, at)| at.elapsed() < RECENT_TTL);
+    if recent.iter().any(|(h, _)| h == hash) {
+        return true;
+    }
+    recent.push((hash.to_owned(), std::time::Instant::now()));
+    false
+}
+
 pub async fn apply_text(
     app: &AppHandle,
     plain: String,
     html: Option<String>,
     rtf: Option<String>,
+) -> Result<()> {
+    apply_text_with(app, plain, html, rtf, true).await
+}
+
+/// `to_clipboard = false` 时只入历史、不写系统剪贴板（拉取云端历史用）。
+pub async fn apply_text_with(
+    app: &AppHandle,
+    plain: String,
+    html: Option<String>,
+    rtf: Option<String>,
+    to_clipboard: bool,
 ) -> Result<()> {
     if !app.state::<SettingsStore>().snapshot().sync.sync_text {
         return Ok(());
@@ -54,11 +81,16 @@ pub async fn apply_text(
             html,
             rtf,
         }),
+        to_clipboard,
     )
     .await
 }
 
 pub async fn apply_image(app: &AppHandle, png: Vec<u8>) -> Result<()> {
+    apply_image_with(app, png, true).await
+}
+
+pub async fn apply_image_with(app: &AppHandle, png: Vec<u8>, to_clipboard: bool) -> Result<()> {
     if !app.state::<SettingsStore>().snapshot().sync.sync_image {
         return Ok(());
     }
@@ -75,11 +107,16 @@ pub async fn apply_image(app: &AppHandle, png: Vec<u8>) -> Result<()> {
             width,
             height,
         }),
+        to_clipboard,
     )
     .await
 }
 
-async fn apply_payload(app: &AppHandle, payload: ClipboardPayload) -> Result<()> {
+async fn apply_payload(
+    app: &AppHandle,
+    payload: ClipboardPayload,
+    to_clipboard: bool,
+) -> Result<()> {
     let settings = app.state::<SettingsStore>().snapshot();
     let store = app.state::<ImageStore>().inner().clone();
 
@@ -94,7 +131,13 @@ async fn apply_payload(app: &AppHandle, payload: ClipboardPayload) -> Result<()>
         return Ok(());
     };
 
-    write_item_with_retry(app, &store, &item).await?;
+    if to_clipboard && seen_recently(&item.content_hash) {
+        return Ok(());
+    }
+
+    if to_clipboard {
+        write_item_with_retry(app, &store, &item).await?;
+    }
 
     let pool = app.state::<DatabaseState>().pool().await;
     persist_and_notify(app, &pool, &item, None).await?;

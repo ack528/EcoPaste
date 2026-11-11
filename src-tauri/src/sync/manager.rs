@@ -22,8 +22,8 @@ use super::files::{self, LocalOffer};
 use super::identity::{current_platform, system_hostname, DeviceStore};
 use super::pairing::{PairOutcome, Pairing, PairingCode, CODE_TTL};
 use super::protocol::{
-    read_plain, write_plain, DeviceMeta, Hello, Intro, Message, SecureReader, SecureWriter,
-    CHUNK_SIZE, DEFAULT_PORT, PROTOCOL_VERSION,
+    read_plain, write_plain, DeviceMeta, FileEntry, Hello, Intro, Message, SecureReader,
+    SecureWriter, CHUNK_SIZE, DEFAULT_PORT, PROTOCOL_VERSION,
 };
 use super::{pairing, remote_files, session, DEVICES_EVENT, PAIRING_EVENT};
 use crate::db::models::{ClipboardItem, ClipboardKind, ClipboardSubKind};
@@ -56,6 +56,9 @@ struct Pending {
     tx: oneshot::Sender<std::result::Result<Vec<u8>, String>>,
 }
 
+/// 已为某条内容登记的文件 offer：`(offer id, 清单, 登记时间)`。
+type PreparedOffer = (String, Vec<FileEntry>, Instant);
+
 struct Inner {
     app: AppHandle,
     store: DeviceStore,
@@ -64,6 +67,8 @@ struct Inner {
     peers: Mutex<HashMap<String, PeerConn>>,
     discovered: Mutex<HashMap<String, Discovered>>,
     offers: Mutex<HashMap<String, Arc<LocalOffer>>>,
+    /// 内容哈希 -> 已登记的文件 offer，局域网与云端广播共用同一份清单。
+    prepared: Mutex<HashMap<String, PreparedOffer>>,
     pending: Mutex<HashMap<u64, Pending>>,
     seq: AtomicU64,
 }
@@ -155,6 +160,7 @@ impl SyncState {
                 peers: Mutex::new(HashMap::new()),
                 discovered: Mutex::new(HashMap::new()),
                 offers: Mutex::new(HashMap::new()),
+                prepared: Mutex::new(HashMap::new()),
                 pending: Mutex::new(HashMap::new()),
                 seq: AtomicU64::new(1),
             }),
@@ -396,6 +402,67 @@ impl SyncState {
         Ok(())
     }
 
+    /// 为复制的文件生成清单并登记 offer（同一条内容复用，供局域网与云端共用）。
+    pub async fn prepare_files(&self, item: &ClipboardItem) -> Result<(String, Vec<FileEntry>)> {
+        let inner = &self.inner;
+        {
+            let mut prepared = inner.prepared.lock().expect("sync poisoned");
+            prepared.retain(|_, (_, _, at)| at.elapsed() < OFFER_TTL);
+            if let Some((offer, entries, _)) = prepared.get(&item.content_hash) {
+                if inner
+                    .offers
+                    .lock()
+                    .expect("sync poisoned")
+                    .contains_key(offer)
+                {
+                    return Ok((offer.clone(), entries.clone()));
+                }
+            }
+        }
+
+        let roots: Vec<String> = item
+            .content
+            .split('\n')
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let (entries, paths) =
+            tauri::async_runtime::spawn_blocking(move || files::build_offer(&roots)).await??;
+
+        let offer = uuid::Uuid::new_v4().to_string();
+        inner.register_offer(
+            offer.clone(),
+            LocalOffer {
+                paths,
+                created: Instant::now(),
+            },
+        );
+        inner.prepared.lock().expect("sync poisoned").insert(
+            item.content_hash.clone(),
+            (offer.clone(), entries.clone(), Instant::now()),
+        );
+        Ok((offer, entries))
+    }
+
+    /// 读取本机已登记 offer 中某文件的一段（云端中转与局域网共用）。
+    pub async fn read_offer_range(
+        &self,
+        offer: &str,
+        index: u32,
+        offset: u64,
+        len: u32,
+    ) -> Result<Vec<u8>> {
+        let local = self
+            .inner
+            .offers
+            .lock()
+            .expect("sync poisoned")
+            .get(offer)
+            .cloned()
+            .ok_or_else(|| anyhow!("file is no longer available"))?;
+        files::read_range(&local, index, offset, len.min(CHUNK_SIZE as u32)).await
+    }
+
     /// 本机新复制了一条内容：按设置推送给所有在线的已配对设备。
     pub fn broadcast(&self, item: ClipboardItem) {
         let inner = self.inner.clone();
@@ -538,6 +605,9 @@ pub async fn fetch_file_range(
     len: u32,
 ) -> Result<Vec<u8>> {
     let inner = &state.inner;
+    if let Some(origin) = peer_id.strip_prefix(crate::cloud::PEER_PREFIX) {
+        return crate::cloud::fetch_file_range(&inner.app, origin, offer, index, offset, len).await;
+    }
     let tx = inner
         .peers
         .lock()
@@ -1170,23 +1240,11 @@ async fn broadcast_item(inner: &Arc<Inner>, item: ClipboardItem) -> Result<()> {
             }
         }
         ClipboardKind::Files if settings.sync.sync_files => {
-            let roots: Vec<String> = item
-                .content
-                .split('\n')
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-                .collect();
-            let (entries, paths) =
-                tauri::async_runtime::spawn_blocking(move || files::build_offer(&roots)).await??;
-
-            let offer = uuid::Uuid::new_v4().to_string();
-            inner.register_offer(
-                offer.clone(),
-                LocalOffer {
-                    paths,
-                    created: Instant::now(),
-                },
-            );
+            let (offer, entries) = SyncState {
+                inner: inner.clone(),
+            }
+            .prepare_files(&item)
+            .await?;
             let message = Message::ClipFiles { offer, entries };
             for tx in &senders {
                 let _ = tx.send(message.clone()).await;
@@ -1195,6 +1253,20 @@ async fn broadcast_item(inner: &Arc<Inner>, item: ClipboardItem) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+/// 文本条目的（纯文本、HTML、RTF）三个表示。
+pub fn text_parts(item: &ClipboardItem) -> (String, Option<String>, Option<String>) {
+    let plain = || {
+        item.search_text
+            .clone()
+            .unwrap_or_else(|| item.content.clone())
+    };
+    match item.sub_kind {
+        Some(ClipboardSubKind::Html) => (plain(), Some(item.content.clone()), None),
+        Some(ClipboardSubKind::Rtf) => (plain(), None, Some(item.content.clone())),
+        _ => (item.content.clone(), None, None),
+    }
 }
 
 fn text_message(item: &ClipboardItem) -> Message {

@@ -13,6 +13,7 @@ window placement, or OS-specific side effects.
 | [Clipboard Pipeline](./clipboard-pipeline.md) | Clipboard capture, content typing, writeback, source apps, preview/list payloads |
 | [Database and Storage](./database-and-storage.md) | SQLite schema, repositories, FTS search, backups, data directory changes |
 | [Settings, Windowing, and Platform](./settings-window-platform.md) | Settings model, shortcuts, tray, autostart, window lifecycle, macOS/Windows code |
+| [Cloud Sync](./cloud-sync.md) | Self-hosted server client: pinned TLS, login, realtime items, history, file relay |
 | [LAN Clipboard Sync](./lan-sync.md) | Pairing, sync wire protocol, discovery, virtual-file paste, what is sent to peers |
 
 ## Layer Map

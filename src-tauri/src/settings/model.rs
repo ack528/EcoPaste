@@ -20,6 +20,7 @@ pub struct Settings {
     pub onboarding: Onboarding,
     pub update: Update,
     pub sync: Sync,
+    pub cloud: Cloud,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -65,6 +66,24 @@ impl Default for Sync {
             sync_text: true,
             sync_image: true,
             sync_files: true,
+        }
+    }
+}
+
+/// 云同步设置。服务器地址、证书指纹与令牌不放这里，见 `cloud` 模块的 `state/cloud.json`。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Cloud {
+    pub enabled: bool,
+    /// 「拉取最近记录」的条数。
+    pub pull_recent: u32,
+}
+
+impl Default for Cloud {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            pull_recent: 50,
         }
     }
 }

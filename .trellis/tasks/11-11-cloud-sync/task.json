@@ -19,7 +19,7 @@
   "priority": "P2",
   "relatedFiles": [],
   "scope": null,
-  "status": "planning",
+  "status": "in_progress",
   "subtasks": [],
   "title": "Cloud sync with self-hosted server and admin app",
   "worktree_path": null

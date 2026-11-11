@@ -70,6 +70,7 @@ pub async fn update_settings(app: AppHandle, patch: serde_json::Value) -> Result
     }
 
     crate::sync::apply_settings(&app);
+    crate::cloud::apply_settings(&app);
     emit_settings_updated(&app, &next);
 
     Ok(next)
@@ -82,6 +83,7 @@ pub async fn reset_settings(app: AppHandle) -> Result<Settings> {
 
     apply_reset_side_effects(&app, &next);
     crate::sync::apply_settings(&app);
+    crate::cloud::apply_settings(&app);
     emit_settings_updated(&app, &next);
 
     Ok(next)

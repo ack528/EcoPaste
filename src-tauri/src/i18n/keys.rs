@@ -30,6 +30,12 @@ pub enum CommandKey {
     SyncCodeInvalid,
     SyncAddressInvalid,
     SyncUnreachable,
+    CloudUnreachable,
+    CloudPinMismatch,
+    CloudBadCredentials,
+    CloudLocked,
+    CloudNotSignedIn,
+    CloudBadAddress,
 }
 
 #[derive(Debug, Clone, Copy)]

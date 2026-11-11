@@ -1505,6 +1505,27 @@ export interface SyncStatus {
   running: boolean;
 }
 
+export type CloudLinkState =
+  | "connected"
+  | "connecting"
+  | "disconnected"
+  | "error";
+
+export interface CloudStatus {
+  enabled: boolean;
+  error: string | null;
+  fingerprint: string;
+  loggedIn: boolean;
+  serverUrl: string;
+  state: CloudLinkState;
+  username: string;
+}
+
+export interface CloudProbeResult {
+  fingerprint: string;
+  serverUrl: string;
+}
+
 export interface SyncPairingEvent {
   peer: string | null;
   state: "expired" | "failed" | "success";
@@ -1570,5 +1591,59 @@ export const syncRemovePeer = (id: string) => {
     TAURI_COMMAND.SYNC_REMOVE_PEER,
     "commands:labels.removeSyncDevice",
     { id },
+  );
+};
+
+/**
+ * 读取云同步状态：登录信息与连接状态。
+ */
+export const cloudGetStatus = () => {
+  return call<CloudStatus>(
+    TAURI_COMMAND.CLOUD_GET_STATUS,
+    "commands:labels.loadCloudStatus",
+  );
+};
+
+/**
+ * 连接服务器并读取其证书指纹，供用户核对后确认。
+ */
+export const cloudProbe = (serverUrl: string) => {
+  return call<CloudProbeResult>(
+    TAURI_COMMAND.CLOUD_PROBE,
+    "commands:labels.probeCloudServer",
+    { serverUrl },
+  );
+};
+
+/**
+ * 用已确认的证书指纹登录云同步服务器。
+ */
+export const cloudLogin = (input: {
+  fingerprint: string;
+  password: string;
+  serverUrl: string;
+  username: string;
+}) => {
+  return call<CloudStatus>(
+    TAURI_COMMAND.CLOUD_LOGIN,
+    "commands:labels.loginCloud",
+    input,
+  );
+};
+
+/**
+ * 退出云同步登录。
+ */
+export const cloudLogout = () => {
+  return call<void>(TAURI_COMMAND.CLOUD_LOGOUT, "commands:labels.logoutCloud");
+};
+
+/**
+ * 拉取云端近期的文本 / 图片到本机历史，返回条数。
+ */
+export const cloudPullRecent = () => {
+  return call<number>(
+    TAURI_COMMAND.CLOUD_PULL_RECENT,
+    "commands:labels.pullCloudHistory",
   );
 };
