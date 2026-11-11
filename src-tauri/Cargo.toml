@@ -1,11 +1,11 @@
 [package]
 name = "EcoPaste"
-version = "1.2.1"
+version = "1.2.2"
 description = "A local-first clipboard manager for macOS and Windows."
-authors = ["ayangweb"]
+authors = ["ack528"]
 license = "Apache-2.0"
-homepage = "https://github.com/EcoPasteHub/EcoPaste"
-repository = "https://github.com/EcoPasteHub/EcoPaste"
+homepage = "https://github.com/ack528/EcoPaste"
+repository = "https://github.com/ack528/EcoPaste"
 readme = "../README.md"
 publish = false
 edition = "2021"
